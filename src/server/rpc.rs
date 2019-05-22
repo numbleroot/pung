@@ -25,6 +25,8 @@ use timely_communication::allocator::generic::Generic;
 
 use util;
 
+use std::io::prelude::*;
+use std::fs::File;
 use std::process;
 use std::thread;
 use std::time::Duration;
@@ -128,6 +130,7 @@ impl PungRpc {
 // Implementation of RPC stubs (see schema/pung.capnp)
 
 impl pung_rpc::Server for PungRpc {
+
     // TODO: Upgrade this to receive keys for directory service
     fn register(
         &mut self,
@@ -195,8 +198,14 @@ impl pung_rpc::Server for PungRpc {
         if (self.round >= self.end_after_round) && (self.clients.len() == 0) {
             
             thread::spawn(move || {
+
                 println!("[EVALUATION] Reached number of configured rounds, sleeping 2 seconds...");
+                
+                let mut metrics_pipe = File::create("/tmp/collect").unwrap();
+                let _ = metrics_pipe.write_all(b"done\n");
+
                 thread::sleep(Duration::from_secs(2));
+
                 println!("Exiting!");
                 process::exit(0);
             });

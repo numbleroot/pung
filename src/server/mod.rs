@@ -103,15 +103,8 @@ pub fn run_rpc(
         let listener = try!(address.listen());
 
         // instance of the pung RPC server
-        let connection = pung_rpc::ToClient::new(PungRpc::new(
-            worker,
-            send,
-            dbase,
-            extra_tuples,
-            min_messages,
-            opt_scheme,
-            end_after_round,
-        )).from_server::<capnp_rpc::Server>();
+        let connection = pung_rpc::ToClient::new(PungRpc::new(worker, send, dbase,
+            extra_tuples, min_messages, opt_scheme, end_after_round)).from_server::<capnp_rpc::Server>();
 
         // defines a set that holds all promises ("tasks") and a destructor in case they go awry
         let task_set = gj::TaskSet::new(Box::new(reaper::Reaper));

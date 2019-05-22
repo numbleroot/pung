@@ -4,7 +4,6 @@ extern crate timely;
 
 // standard libraries
 
-
 use getopts::Options;
 
 use pung::db;

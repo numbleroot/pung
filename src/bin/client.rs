@@ -140,15 +140,8 @@ pub fn main() {
     gj::EventLoop::top_level(move |wait_scope| -> Result<(), capnp::Error> {
 
             let mut event_port = gjio::EventPort::new().unwrap();
-            let mut client = PungClient::new(&user_name,
-                                             &server_addr,
-                                             send_rate,
-                                             ret_rate,
-                                             depth,
-                                             ret_scheme,
-                                             opt_scheme,
-                                             wait_scope,
-                                             &mut event_port);
+            let mut client = PungClient::new(&user_name, &server_addr, send_rate, ret_rate,
+                depth, ret_scheme, opt_scheme, wait_scope, &mut event_port);
 
             client.init_dummy_peer();
             client.add_peer(&peer_name, &secret);
