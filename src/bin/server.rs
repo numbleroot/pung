@@ -153,6 +153,8 @@ fn main() {
             let worker_port = port + index; // port of this worker
             let addr = FromStr::from_str(&format!("{}:{}", &rpc_addr, worker_port)).unwrap();
 
+            println!("Will start worker {} at addr {}", index, addr);
+
             // Run RPC server on this worker.
             pung::server::run_rpc(addr,
                                   worker.clone(),

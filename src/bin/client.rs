@@ -10,6 +10,8 @@ use getopts::Options;
 use pung::client::PungClient;
 use pung::db;
 use time::PreciseTime;
+use std::fs::File;
+use std::io::prelude::*;
 
 fn print_usage(program: &str, opts: Options) {
     let brief = format!("Usage: {} [options]", program);
@@ -39,6 +41,9 @@ pub fn main() {
     opts.optopt("r", "round", "number of rounds", "ROUND");
     opts.optopt("t", "type", "retrieval type", "e / b / t");
     opts.optopt("b", "extra", "change server extra", "EXTRA");
+
+    // Evaluation parameter.
+    opts.optopt("e", "metrics-pipe", "file system location of named pipe to write metrics to", "METRICSPIPE");
 
     // TODO: Maybe an option for a JSON config file to describe multiple peers.
 
@@ -111,7 +116,6 @@ pub fn main() {
         None => db::RetScheme::Explicit,
     };
 
-
     let opt_scheme: db::OptScheme = match matches.opt_str("o") {
         Some(v) => {
             if ret_rate > 1 {
@@ -131,6 +135,7 @@ pub fn main() {
         None => db::OptScheme::Normal,
     };
 
+    let mut metrics_pipe = File::create(matches.opt_str("e").unwrap()).unwrap();
 
     gj::EventLoop::top_level(move |wait_scope| -> Result<(), capnp::Error> {
 
@@ -165,22 +170,22 @@ pub fn main() {
             //        std::thread::sleep(std::time::Duration::new(5, 0));
 
             let start_round = PreciseTime::now();
-            for _ in 0..rounds {
+            for round in 0..rounds {
 
-                //      println!("{} - Sending {} tuples for round {}", unique_id, send_rate, client.get_round());
+                println!("{} - Sending {} tuples for round {}", unique_id, send_rate, client.get_round());
 
                 // create random message
                 let mut messages = Vec::with_capacity(send_rate as usize);
 
                 for i in 0..send_rate {
-                    let msg = format!("msg #{} from {}", i, unique_id).into_bytes();
+                    let msg = format!("{}=>{} {:05} msg #{} from {}", user_name, peer_name, round as u32, i, unique_id).into_bytes();
                     messages.push(msg);
                 }
 
                 let start = PreciseTime::now();
 
                 // send tuple
-                try!(client.send(&peer_name, &mut messages, &wait_scope, &mut event_port));
+                try!(client.send(&peer_name, &mut messages, &wait_scope, &mut event_port, &mut metrics_pipe));
 
                 let end = PreciseTime::now();
                 let duration = start.to(end);
@@ -189,7 +194,7 @@ pub fn main() {
 
 
                 // retrieve msg
-                //            println!("{} - Retrieving a message for round {}", unique_id, client.get_round());
+                println!("{} - Retrieving a message for round {}", unique_id, client.get_round());
 
                 let start = PreciseTime::now();
 
@@ -200,12 +205,10 @@ pub fn main() {
                     peers.push(&peer_name);
                 }
 
-                let msgs = try!(client.retr(&peers[..], &wait_scope, &mut event_port));
+                let msgs = try!(client.retr(&peers[..], &wait_scope, &mut event_port, &mut metrics_pipe));
 
                 let end = PreciseTime::now();
-                println!("retr ({} msgs): {:?} usec",
-                         msgs.len(),
-                         start.to(end).num_microseconds().unwrap());
+                println!("retr ({} msgs): {:?} usec", msgs.len(), start.to(end).num_microseconds().unwrap());
 
                 for msg in msgs {
                     println!("{} - Retrieved msg is {}", unique_id, String::from_utf8(msg).unwrap());
@@ -213,6 +216,8 @@ pub fn main() {
 
                 client.inc_round(1);
             }
+
+            metrics_pipe.write_all(b"done\n")?;
 
             let end_round = PreciseTime::now();
             let duration = start_round.to(end_round);

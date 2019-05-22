@@ -25,6 +25,11 @@ use std::net::ToSocketAddrs;
 use util;
 use util::bloomfilter;
 
+use std::str;
+use std::io::prelude::*;
+use std::fs::File;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 pub mod pcrypto;
 
 struct PungPeer {
@@ -322,7 +327,9 @@ impl<'a> PungClient<'a> {
         msgs: &mut Vec<Vec<u8>>,
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<u64, Error> {
+
         if !self.peers.contains_key(&recipient) {
             return Err(Error::failed("Invalid recipient name".to_string()));
         } else if msgs.is_empty() {
@@ -340,6 +347,7 @@ impl<'a> PungClient<'a> {
             let mut measurement_byte_count = 0;
 
             for msg in msgs.drain(..) {
+
                 let (mut c, mut mac) = pcrypto::encrypt(&peer.keys.k_e[..], self.round, &msg[..]);
 
                 let mut tuple = pcrypto::gen_label(
@@ -380,7 +388,7 @@ impl<'a> PungClient<'a> {
                         collision_count += 1;
                     }
 
-                    // Postcondtion: the two labels fall in different buckets
+                    // Postcondition: the two labels fall in different buckets
 
                     tuple.append(&mut label_alias);
                 }
@@ -402,6 +410,12 @@ impl<'a> PungClient<'a> {
         let mut total_tuples: u64 = 0;
 
         let res_ptr = try!(send_request.send().promise.wait(scope, port));
+
+        // Write time of successful send operation out to metrics pipe.
+        let send_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let metrics_text = format!("send;{} {}=>{} {:05}\n", send_time.as_nanos(), self.name, recipient, self.round);
+        metrics_pipe.write_all(&metrics_text.into_bytes())?;
+
         let response = try!(res_ptr.get());
 
         let buckets_num = try!(response.get_num_messages());
@@ -724,6 +738,7 @@ impl<'a> PungClient<'a> {
         mut bucket_map: HashMap<usize, Vec<(&'a PungPeer, Vec<u8>)>>,
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<Vec<Vec<u8>>, Error> {
         let retries = self.max_retries();
         let dummy = &self.peers["dummy"];
@@ -753,9 +768,10 @@ impl<'a> PungClient<'a> {
                         let idx = some_or_random!(util::get_index(labels, &label), rng, num);
 
                         // Get a tuple using PIR to retrieve
-                        let t = try!(self.pir_retr(bucket, 0, 0, idx, num, scope, port));
+                        let t = try!(self.pir_retr(bucket, 0, 0, idx, num, scope, port, metrics_pipe));
 
                         if t.label() == &label[..] {
+
                             // decrypt ciphertext using shared key and insert it into message list
                             let m = try!(pcrypto::decrypt(
                                 &peer.keys.k_e[..],
@@ -763,6 +779,10 @@ impl<'a> PungClient<'a> {
                                 t.cipher(),
                                 t.mac()
                             ));
+
+                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..32].to_vec()).unwrap());
+                            metrics_pipe.write_all(&metrics_text.into_bytes())?;
+
                             messages.push(m);
                         }
                     }
@@ -786,13 +806,13 @@ impl<'a> PungClient<'a> {
                         let bloom = &bloom_filters[&bucket][&0];
 
                         // Get index of label if available or random otherwise
-                        let idx =
-                            some_or_random!(util::get_idx_bloom(bloom, &label, num), rng, num);
+                        let idx = some_or_random!(util::get_idx_bloom(bloom, &label, num), rng, num);
 
                         // Get a tuple using PIR to retrieve
-                        let t = try!(self.pir_retr(bucket, 0, 0, idx, num, scope, port));
+                        let t = try!(self.pir_retr(bucket, 0, 0, idx, num, scope, port, metrics_pipe));
 
                         if t.label() == &label[..] {
+
                             // decrypt ciphertext using shared key and insert it into message list
                             let m = try!(pcrypto::decrypt(
                                 &peer.keys.k_e[..],
@@ -800,6 +820,10 @@ impl<'a> PungClient<'a> {
                                 t.cipher(),
                                 t.mac()
                             ));
+
+                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..32].to_vec()).unwrap());
+                            metrics_pipe.write_all(&metrics_text.into_bytes())?;
+
                             messages.push(m);
                         }
                     }
@@ -817,10 +841,10 @@ impl<'a> PungClient<'a> {
                         let num = self.buckets[bucket].num_tuples();
 
                         // Perform bst retrieval
-                        let result =
-                            try!(self.bst_retr(&label[..], bucket, 0, num, &mut rng, scope, port));
+                        let result = try!(self.bst_retr(&label[..], bucket, 0, num, &mut rng, scope, port, metrics_pipe));
 
                         if let Some(t) = result {
+
                             // decrypt ciphertext using shared key and insert it into message list
                             let m = try!(pcrypto::decrypt(
                                 &peer.keys.k_e[..],
@@ -828,6 +852,10 @@ impl<'a> PungClient<'a> {
                                 t.cipher(),
                                 t.mac()
                             ));
+
+                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..32].to_vec()).unwrap());
+                            metrics_pipe.write_all(&metrics_text.into_bytes())?;
+
                             messages.push(m);
                         }
                     }
@@ -844,6 +872,7 @@ impl<'a> PungClient<'a> {
         mut bucket_map: HashMap<usize, Vec<(&'a PungPeer, Vec<u8>)>>,
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<Vec<Vec<u8>>, Error> {
         let retries = self.max_retries();
         let dummy = &self.peers["dummy"];
@@ -894,9 +923,9 @@ impl<'a> PungClient<'a> {
                                 let idx2 =
                                     some_or_random!(util::get_index(col0, &label2), rng, len0);
 
-                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port));
-                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port));
-                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx2, len0, scope, port));
+                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port, metrics_pipe));
+                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port, metrics_pipe));
+                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx2, len0, scope, port, metrics_pipe));
 
                                 (t1, (&t2 ^ &t3))
                             }
@@ -908,8 +937,8 @@ impl<'a> PungClient<'a> {
                                 let idx2 =
                                     some_or_random!(util::get_index(col1, &label2), rng, len1);
 
-                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port));
-                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port));
+                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port, metrics_pipe));
+                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port, metrics_pipe));
 
                                 // fake request
                                 try!(self.pir_retr(
@@ -919,7 +948,8 @@ impl<'a> PungClient<'a> {
                                     rng.next_u64() % len0,
                                     len0,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 (t1, t2)
@@ -932,8 +962,8 @@ impl<'a> PungClient<'a> {
                                 let idx2 =
                                     some_or_random!(util::get_index(col0, &label2), rng, len0);
 
-                                let t2 = try!(self.pir_retr(bucket, 0, 0, idx2, len0, scope, port));
-                                let t1 = try!(self.pir_retr(bucket, 1, 0, idx1, len1, scope, port));
+                                let t2 = try!(self.pir_retr(bucket, 0, 0, idx2, len0, scope, port, metrics_pipe));
+                                let t1 = try!(self.pir_retr(bucket, 1, 0, idx1, len1, scope, port, metrics_pipe));
 
                                 // fake request
                                 try!(self.pir_retr(
@@ -943,7 +973,8 @@ impl<'a> PungClient<'a> {
                                     rng.next_u64() % len0,
                                     len0,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 (t1, t2)
@@ -956,9 +987,9 @@ impl<'a> PungClient<'a> {
                                 let idx2 =
                                     some_or_random!(util::get_index(col1, &label2), rng, len1);
 
-                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port));
-                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port));
-                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx1, len0, scope, port));
+                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port, metrics_pipe));
+                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port, metrics_pipe));
+                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx1, len0, scope, port, metrics_pipe));
 
                                 ((&t1 ^ &t3), t2)
                             }
@@ -1033,9 +1064,9 @@ impl<'a> PungClient<'a> {
                                     len0
                                 );
 
-                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port));
-                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port));
-                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx2, len0, scope, port));
+                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port, metrics_pipe));
+                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port, metrics_pipe));
+                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx2, len0, scope, port, metrics_pipe));
 
                                 (t1, (&t2 ^ &t3))
                             }
@@ -1053,8 +1084,8 @@ impl<'a> PungClient<'a> {
                                     len1
                                 );
 
-                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port));
-                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port));
+                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port, metrics_pipe));
+                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port, metrics_pipe));
 
                                 // fake request
                                 try!(self.pir_retr(
@@ -1064,7 +1095,8 @@ impl<'a> PungClient<'a> {
                                     rng.next_u64() % len0,
                                     len0,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 (t1, t2)
@@ -1083,8 +1115,8 @@ impl<'a> PungClient<'a> {
                                     len0
                                 );
 
-                                let t2 = try!(self.pir_retr(bucket, 0, 0, idx2, len0, scope, port));
-                                let t1 = try!(self.pir_retr(bucket, 1, 0, idx1, len1, scope, port));
+                                let t2 = try!(self.pir_retr(bucket, 0, 0, idx2, len0, scope, port, metrics_pipe));
+                                let t1 = try!(self.pir_retr(bucket, 1, 0, idx1, len1, scope, port, metrics_pipe));
 
                                 // fake request
                                 try!(self.pir_retr(
@@ -1094,7 +1126,8 @@ impl<'a> PungClient<'a> {
                                     rng.next_u64() % len0,
                                     len0,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 (t1, t2)
@@ -1113,9 +1146,9 @@ impl<'a> PungClient<'a> {
                                     len1
                                 );
 
-                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port));
-                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port));
-                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx1, len0, scope, port));
+                                let t1 = try!(self.pir_retr(bucket, 0, 0, idx1, len0, scope, port, metrics_pipe));
+                                let t2 = try!(self.pir_retr(bucket, 1, 0, idx2, len1, scope, port, metrics_pipe));
+                                let t3 = try!(self.pir_retr(bucket, 2, 0, idx1, len0, scope, port, metrics_pipe));
 
                                 ((&t1 ^ &t3), t2)
                             }
@@ -1179,7 +1212,8 @@ impl<'a> PungClient<'a> {
                                     len0,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 let t2 = try!(self.bst_joint_retr(
@@ -1190,7 +1224,8 @@ impl<'a> PungClient<'a> {
                                     len0,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 (t1, t2)
@@ -1205,7 +1240,8 @@ impl<'a> PungClient<'a> {
                                     len0,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 let t2 = try!(self.bst_retr(
@@ -1215,7 +1251,8 @@ impl<'a> PungClient<'a> {
                                     len1,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 // Generate dummy label
@@ -1235,7 +1272,8 @@ impl<'a> PungClient<'a> {
                                     len0,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
 
@@ -1251,7 +1289,8 @@ impl<'a> PungClient<'a> {
                                     len0,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 let t1 = try!(self.bst_retr(
@@ -1261,7 +1300,8 @@ impl<'a> PungClient<'a> {
                                     len1,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 // Generate dummy label
@@ -1281,7 +1321,8 @@ impl<'a> PungClient<'a> {
                                     len0,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 (t1, t2)
@@ -1303,7 +1344,8 @@ impl<'a> PungClient<'a> {
                                     len0,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 let t1 = try!(self.bst_retr(
@@ -1313,7 +1355,8 @@ impl<'a> PungClient<'a> {
                                     len1,
                                     &mut rng,
                                     scope,
-                                    port
+                                    port,
+                                    metrics_pipe,
                                 ));
 
                                 (t1, t2)
@@ -1355,6 +1398,7 @@ impl<'a> PungClient<'a> {
         mut bucket_map: HashMap<usize, Vec<(&'a PungPeer, Vec<u8>)>>,
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<Vec<Vec<u8>>, Error> {
         let dummy = &self.peers["dummy"];
         let mut dummy_count = 0;
@@ -1460,7 +1504,8 @@ impl<'a> PungClient<'a> {
                                         idx,
                                         len,
                                         scope,
-                                        port
+                                        port,
+                                        metrics_pipe,
                                     ));
                                 }
 
@@ -1495,7 +1540,7 @@ impl<'a> PungClient<'a> {
 
                         let idx = rng.next_u64() % len;
 
-                        try!(self.pir_retr(bucket, *part as u32, 0, idx, len, scope, port));
+                        try!(self.pir_retr(bucket, *part as u32, 0, idx, len, scope, port, metrics_pipe));
                     }
                 }
             }
@@ -1602,7 +1647,8 @@ impl<'a> PungClient<'a> {
                                             tmp_idx,
                                             len,
                                             scope,
-                                            port
+                                            port,
+                                            metrics_pipe,
                                         ));
                                     } else {
                                         //Create tuple by requesting part and XORING to prior parts
@@ -1613,7 +1659,8 @@ impl<'a> PungClient<'a> {
                                             idx,
                                             len,
                                             scope,
-                                            port
+                                            port,
+                                            metrics_pipe,
                                         ));
                                     }
                                 }
@@ -1649,7 +1696,7 @@ impl<'a> PungClient<'a> {
 
                         let idx = rng.next_u64() % len;
 
-                        try!(self.pir_retr(bucket, *part as u32, 0, idx, len, scope, port));
+                        try!(self.pir_retr(bucket, *part as u32, 0, idx, len, scope, port, metrics_pipe));
                     }
                 }
             }
@@ -1674,6 +1721,7 @@ impl<'a> PungClient<'a> {
         len: u64,
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<db::PungTuple, Error> {
         // set up PIR handler
         // compute ideal alpha
@@ -1708,6 +1756,10 @@ impl<'a> PungClient<'a> {
         // Decode answer to get tuple
         let decoded = self.pir_handler.decode_answer(answer, a_num);
 
+        // Write out retrieve time to metrics pipe.
+        let metrics_text = format!("recv;{}\n", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
+        metrics_pipe.write_all(&metrics_text.into_bytes())?;
+
         println!("Download (pir) {} bytes", 8 + answer.len());
 
         Ok(db::PungTuple::new(decoded.result))
@@ -1723,6 +1775,7 @@ impl<'a> PungClient<'a> {
         rng: &mut rand::ChaChaRng,
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<Option<db::PungTuple>, Error> {
         let tree_height = util::tree_height(num);
         let mut idx = 0; // first index is 0
@@ -1731,7 +1784,7 @@ impl<'a> PungClient<'a> {
 
         // Request level by level
         for h in 0..tree_height {
-            let tuple = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port));
+            let tuple = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port, metrics_pipe));
 
             if result.is_none() {
                 if tuple.gt(label) {
@@ -1771,6 +1824,7 @@ impl<'a> PungClient<'a> {
         rng: &mut rand::ChaChaRng,
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<Option<db::PungTuple>, Error> {
         assert!(num2 == num || num2 == num + 1);
 
@@ -1783,8 +1837,8 @@ impl<'a> PungClient<'a> {
 
         // Request level by level
         for h in 0..tree_height - 1 {
-            let t1 = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port));
-            let t2 = try!(self.pir_retr(bucket, 2, h, idx, len, scope, port));
+            let t1 = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port, metrics_pipe));
+            let t2 = try!(self.pir_retr(bucket, 2, h, idx, len, scope, port, metrics_pipe));
 
             let tuple = &t1 ^ &t2;
 
@@ -1818,8 +1872,8 @@ impl<'a> PungClient<'a> {
                 idx = rng.next_u64() % len;
             }
 
-            let t1 = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port));
-            let t2 = try!(self.pir_retr(bucket, 2, h, idx, len, scope, port));
+            let t1 = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port, metrics_pipe));
+            let t2 = try!(self.pir_retr(bucket, 2, h, idx, len, scope, port, metrics_pipe));
 
             if result.is_none() {
                 let tuple = &t1 ^ &t2;
@@ -1836,7 +1890,7 @@ impl<'a> PungClient<'a> {
                 assert_eq!(len, 1);
 
                 // This is pretty wasteful :(. Optimization is to just fetch it normally
-                let tuple = try!(self.pir_retr(bucket, 2, h + 1, 0, 1, scope, port));
+                let tuple = try!(self.pir_retr(bucket, 2, h + 1, 0, 1, scope, port, metrics_pipe));
 
                 if result.is_none() && tuple.label() == label {
                     result = Some(tuple);
@@ -1856,8 +1910,8 @@ impl<'a> PungClient<'a> {
                 idx2 = rng.next_u64() % len2;
             }
 
-            let t1 = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port));
-            let t2 = try!(self.pir_retr(bucket, 2, h, idx2, len2, scope, port));
+            let t1 = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port, metrics_pipe));
+            let t2 = try!(self.pir_retr(bucket, 2, h, idx2, len2, scope, port, metrics_pipe));
 
             if result.is_none() {
                 // If the same node was not fetched, then just use t2. Otherwise use combination
@@ -1877,6 +1931,7 @@ impl<'a> PungClient<'a> {
         peer_names: &[&str],
         scope: &gj::WaitScope,
         port: &mut gjio::EventPort,
+        metrics_pipe: &mut File,
     ) -> Result<Vec<Vec<u8>>, Error> {
         if peer_names.len() as u32 > self.ret_rate {
             return Err(Error::failed("Number of peers exceeds rate".to_string()));
@@ -1886,10 +1941,10 @@ impl<'a> PungClient<'a> {
 
         match self.opt_scheme {
             db::OptScheme::Normal | db::OptScheme::Aliasing => {
-                self.retr_normal(bucket_map, scope, port)
+                self.retr_normal(bucket_map, scope, port, metrics_pipe)
             }
-            db::OptScheme::Hybrid2 => self.retr_hybrid2(bucket_map, scope, port),
-            db::OptScheme::Hybrid4 => self.retr_hybrid4(bucket_map, scope, port),
+            db::OptScheme::Hybrid2 => self.retr_hybrid2(bucket_map, scope, port, metrics_pipe),
+            db::OptScheme::Hybrid4 => self.retr_hybrid4(bucket_map, scope, port, metrics_pipe),
         }
     }
 }

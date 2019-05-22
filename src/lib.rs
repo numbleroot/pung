@@ -16,6 +16,8 @@ extern crate gjio;
 extern crate timely;
 extern crate timely_communication;
 
+extern crate time;
+
 /// Auto-generated stubs from the [Cap'n Proto RPC protocol](../capnp_rpc/index.html).
 pub mod pung_capnp {
     include!(concat!(env!("OUT_DIR"), "/pung_capnp.rs"));
