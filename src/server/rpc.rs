@@ -25,6 +25,10 @@ use timely_communication::allocator::generic::Generic;
 
 use util;
 
+use std::process;
+use std::thread;
+use std::time::Duration;
+
 
 #[derive(PartialEq)]
 enum Phase {
@@ -60,6 +64,8 @@ pub struct PungRpc {
 
     min_messages: u32, // hack to prevent server from advancing round until all clients have sent
     opt_scheme: db::OptScheme,
+
+    end_after_round: u64,
 }
 
 
@@ -71,6 +77,7 @@ impl PungRpc {
         extra: usize,
         min_messages: u32,
         opt_scheme: db::OptScheme,
+        end_after_round: u64,
     ) -> PungRpc {
         let mut extra_tuples = Vec::with_capacity(extra);
         let mut rng = ChaChaRng::new_unseeded();
@@ -99,6 +106,7 @@ impl PungRpc {
             extra_tuples: extra_tuples,
             min_messages: min_messages,
             opt_scheme: opt_scheme,
+            end_after_round: end_after_round,
         }
     }
 
@@ -126,6 +134,7 @@ impl pung_rpc::Server for PungRpc {
         params: RegisterParams,
         mut res: RegisterResults,
     ) -> gj::Promise<(), Error> {
+
         let req = pry!(params.get());
         let rate: u32 = req.get_rate();
         let id: u64 = self.next_id();
@@ -141,6 +150,7 @@ impl pung_rpc::Server for PungRpc {
 
     // TODO: upgrade to be able to replace directory service key
     fn sync(&mut self, params: SyncParams, mut res: SyncResults) -> gj::Promise<(), Error> {
+
         let id = pry!(params.get()).get_id();
 
         if !self.clients.contains_key(&id) {
@@ -161,6 +171,7 @@ impl pung_rpc::Server for PungRpc {
 
 
     fn close(&mut self, params: CloseParams, mut res: CloseResults) -> gj::Promise<(), Error> {
+
         let req = pry!(params.get());
         let id: u64 = req.get_id();
 
@@ -178,6 +189,19 @@ impl pung_rpc::Server for PungRpc {
             self.ret_ctx.reqs.remove(&id);
         }
 
+        // In case we reached the configured number of
+        // rounds and this is the last client closing the
+        // round, exit the server process.
+        if (self.round >= self.end_after_round) && (self.clients.len() == 0) {
+            
+            thread::spawn(move || {
+                println!("[EVALUATION] Reached number of configured rounds, sleeping 2 seconds...");
+                thread::sleep(Duration::from_secs(2));
+                println!("Exiting!");
+                process::exit(0);
+            });
+        }
+
         res.get().set_success(true);
         gj::Promise::ok(())
     }
@@ -187,6 +211,7 @@ impl pung_rpc::Server for PungRpc {
         params: ChangeExtraParams,
         mut res: ChangeExtraResults,
     ) -> gj::Promise<(), Error> {
+
         let req = pry!(params.get());
         let extra: u64 = req.get_extra();
 
@@ -210,6 +235,7 @@ impl pung_rpc::Server for PungRpc {
         params: GetMappingParams,
         mut res: GetMappingResults,
     ) -> gj::Promise<(), Error> {
+
         let round = pry!(params.get()).get_round();
 
         if round != self.round {
@@ -249,6 +275,7 @@ impl pung_rpc::Server for PungRpc {
         params: GetBloomParams,
         mut res: GetBloomResults,
     ) -> gj::Promise<(), Error> {
+
         let round = pry!(params.get()).get_round();
 
         if round != self.round {
@@ -279,6 +306,7 @@ impl pung_rpc::Server for PungRpc {
 
 
     fn send(&mut self, params: SendParams, mut res: SendResults) -> gj::Promise<(), Error> {
+
         let req = pry!(params.get());
         let id: u64 = req.get_id();
         let round: u64 = req.get_round();
@@ -471,6 +499,7 @@ impl pung_rpc::Server for PungRpc {
 
 
     fn retr(&mut self, params: RetrParams, mut res: RetrResults) -> gj::Promise<(), Error> {
+
         let req = pry!(params.get());
         let id: u64 = req.get_id();
         let round: u64 = req.get_round();
@@ -536,10 +565,12 @@ impl pung_rpc::Server for PungRpc {
 
         // Check to see if we are done and we can move on to next round
         if !self.ret_ctx.reqs.values().any(|&x| x > 0) {
+
             self.send_ctx.reqs = self.clients.clone();
             self.send_ctx.count = 0;
             self.round += 1;
             self.phase = Phase::Sending;
+
             db.clear(); // Garbage collect the whole thing
 
             println!("Advancing to round {}", self.round);

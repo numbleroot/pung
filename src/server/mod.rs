@@ -88,10 +88,12 @@ pub fn run_rpc(
     extra_tuples: usize,
     min_messages: u32,
     opt_scheme: db::OptScheme,
+    end_after_round: u64,
 ) {
     // Event-loop for RPC. This never returns.
 
     gj::EventLoop::top_level(move |wait_scope| -> Result<(), capnp::Error> {
+
         // create event port
         let mut event_port = try!(gjio::EventPort::new());
         let network = event_port.get_network();
@@ -108,10 +110,13 @@ pub fn run_rpc(
             extra_tuples,
             min_messages,
             opt_scheme,
+            end_after_round,
         )).from_server::<capnp_rpc::Server>();
 
         // defines a set that holds all promises ("tasks") and a destructor in case they go awry
         let task_set = gj::TaskSet::new(Box::new(reaper::Reaper));
+
+        println!("\nServer listening on {}\n", addr);
 
         try!(accept_loop(listener, task_set, connection).wait(wait_scope, &mut event_port));
 

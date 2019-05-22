@@ -55,6 +55,9 @@ fn main() {
     opts.optopt("o", "opt", "power (p) or hybrid (h)", "p / h");
     opts.optopt("t", "type", "retrieval type", "e / b / t");
 
+    // Evaluation parameter.
+    opts.optopt("e", "end-after-round", "exit the server process after having completed the round with this round", "ENDAFTERROUND");
+
     // Parse parameters
     let matches = match opts.parse(&args[1..]) {
         Ok(m) => m,
@@ -142,6 +145,11 @@ fn main() {
         None => db::OptScheme::Normal,
     };
 
+    let end_after_round: u64 = match matches.opt_str("e") {
+        Some(v) => u64::from_str_radix(&v, 10).unwrap(),
+        None => 0,
+    };
+
     // For each worker thred
     timely::execute_from_args(timely_args.into_iter(), move |mut worker| {
 
@@ -153,17 +161,8 @@ fn main() {
             let worker_port = port + index; // port of this worker
             let addr = FromStr::from_str(&format!("{}:{}", &rpc_addr, worker_port)).unwrap();
 
-            println!("Will start worker {} at addr {}", index, addr);
-
             // Run RPC server on this worker.
-            pung::server::run_rpc(addr,
-                                  worker.clone(),
-                                  send_handle,
-                                  dbase,
-                                  extra_tuples,
-                                  min_messages,
-                                  opt_scheme);
-
+            pung::server::run_rpc(addr, worker.clone(), send_handle, dbase, extra_tuples, min_messages, opt_scheme, end_after_round);
         })
         .expect("Timely dataflow error");
 }
