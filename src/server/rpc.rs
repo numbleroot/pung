@@ -199,7 +199,7 @@ impl pung_rpc::Server for PungRpc {
             
             thread::spawn(move || {
 
-                println!("[EVALUATION] Reached number of configured rounds, sleeping 2 seconds...");
+                println!("\n[EVALUATION] Reached number of configured rounds, sleeping 2 seconds...");
                 
                 let mut metrics_pipe = File::create("/tmp/collect").unwrap();
                 let _ = metrics_pipe.write_all(b"done\n");

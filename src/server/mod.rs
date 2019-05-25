@@ -109,7 +109,7 @@ pub fn run_rpc(
         // defines a set that holds all promises ("tasks") and a destructor in case they go awry
         let task_set = gj::TaskSet::new(Box::new(reaper::Reaper));
 
-        println!("\nServer listening on {}\n", addr);
+        println!("Server listening on {}\n", addr);
 
         try!(accept_loop(listener, task_set, connection).wait(wait_scope, &mut event_port));
 

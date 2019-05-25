@@ -402,7 +402,7 @@ impl<'a> PungClient<'a> {
                 idx += 1;
             }
 
-            println!("Upload (send rpc) {} bytes", measurement_byte_count + 16);
+            // println!("Upload (send rpc) {} bytes", measurement_byte_count + 16);
         }
 
         // get RPC response which contains total number of tuples and lmids
@@ -436,10 +436,7 @@ impl<'a> PungClient<'a> {
 
             // This accounts for: 8 bytes (64 bits) for each bucket number entry
             // and the Lmid label
-            println!(
-                "Download (send rpc) {} bytes",
-                (buckets_num.len() * 8) + (buckets_lmid.len() * db::LABEL_SIZE as u32)
-            );
+            // println!("Download (send rpc) {} bytes", (buckets_num.len() * 8) + (buckets_lmid.len() * db::LABEL_SIZE as u32));
         } else if self.opt_scheme == db::OptScheme::Hybrid4 {
             let buckets_lmid = try!(response.get_min_labels());
             assert_eq!(buckets_num.len() * 3, buckets_lmid.len()); // delimeters per bucket
@@ -461,10 +458,7 @@ impl<'a> PungClient<'a> {
 
             // This accounts for: 8 bytes (64 bits) for each bucket number entry
             // and the 3 Lmid labels per bucket
-            println!(
-                "Download (send rpc) {} bytes",
-                (buckets_num.len() * 8) + (buckets_lmid.len() * db::LABEL_SIZE as u32)
-            );
+            // println!("Download (send rpc) {} bytes", (buckets_num.len() * 8) + (buckets_lmid.len() * db::LABEL_SIZE as u32));
         } else {
             for i in 0..buckets_num.len() {
                 self.buckets.push(BucketInfo {
@@ -475,7 +469,7 @@ impl<'a> PungClient<'a> {
             }
 
             // 8 bytes (64 bits) for each bucket number entry
-            println!("Download (send rpc) {} bytes", buckets_num.len() * 8);
+            // println!("Download (send rpc) {} bytes", buckets_num.len() * 8);
         }
 
         Ok(total_tuples)
@@ -495,6 +489,7 @@ impl<'a> PungClient<'a> {
 
         // Go through each peer, get labels and see to which bucket they map
         for peer_name in peer_names {
+
             if !self.peers.contains_key(peer_name) {
                 return Err(Error::failed("Invalid peer name".to_string()));
             }
@@ -512,9 +507,8 @@ impl<'a> PungClient<'a> {
             // find out on which bucket this label falls
             let bucket_idx = util::bucket_idx(&label, &self.partitions);
 
-            // Add (peer, label) to the bucket map. If there are collisions, append it to list
-            // If there is aliasing, derive second label too
-
+            // Add (peer, label) to the bucket map. If there are collisions, append it to list.
+            // If there is aliasing, derive second label too.
             if self.opt_scheme >= db::OptScheme::Aliasing {
                 let mut collisions = 0; // Number of collisions found so far
                 let mut label_alias = pcrypto::gen_label(
@@ -540,7 +534,7 @@ impl<'a> PungClient<'a> {
                     bucket_idx_alias = util::bucket_idx(&label_alias, &self.partitions);
                 }
 
-                // Lenghts of the buckets
+                // Lengths of the buckets
                 let len1 = if let Some(bucket) = bucket_map.get(&bucket_idx) {
                     bucket.len()
                 } else {
@@ -618,7 +612,7 @@ impl<'a> PungClient<'a> {
         map_request.get().set_round(self.round);
 
         // RPC is 8 bytes
-        println!("Upload (explicit label rpc) {} bytes", 8);
+        // println!("Upload (explicit label rpc) {} bytes", 8);
 
         let response = try!(map_request.send().promise.wait(scope, port));
 
@@ -657,10 +651,7 @@ impl<'a> PungClient<'a> {
             }
         }
 
-        println!(
-            "Download (explicit label rpc) {} bytes",
-            download_measurement
-        );
+        // println!("Download (explicit label rpc) {} bytes", download_measurement);
 
         Ok(label_map)
     }
@@ -676,7 +667,7 @@ impl<'a> PungClient<'a> {
         bloom_request.get().set_round(self.round);
 
         // RPC is 8 bytes
-        println!("Upload (bloom filter rpc) {} bytes", 8);
+        // println!("Upload (bloom filter rpc) {} bytes", 8);
 
         let response = try!(bloom_request.send().promise.wait(scope, port));
 
@@ -727,7 +718,7 @@ impl<'a> PungClient<'a> {
             }
         }
 
-        println!("Download (bloom filter rpc) {} bytes", download_measurement);
+        // println!("Download (bloom filter rpc) {} bytes", download_measurement);
 
         Ok(bloom_map)
     }
@@ -740,6 +731,7 @@ impl<'a> PungClient<'a> {
         port: &mut gjio::EventPort,
         metrics_pipe: &mut File,
     ) -> Result<Vec<Vec<u8>>, Error> {
+
         let retries = self.max_retries();
         let dummy = &self.peers["dummy"];
         let mut dummy_count = 0;
@@ -780,7 +772,7 @@ impl<'a> PungClient<'a> {
                                 t.mac()
                             ));
 
-                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..32].to_vec()).unwrap());
+                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..31].to_vec()).unwrap());
                             metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
                             messages.push(m);
@@ -821,7 +813,7 @@ impl<'a> PungClient<'a> {
                                 t.mac()
                             ));
 
-                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..32].to_vec()).unwrap());
+                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..31].to_vec()).unwrap());
                             metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
                             messages.push(m);
@@ -837,7 +829,7 @@ impl<'a> PungClient<'a> {
                         let (peer, label) =
                             self.next_label(&mut bucket_map, bucket, dummy, &mut dummy_count);
 
-                        // Number of elemnets in bucket
+                        // Number of elements in bucket
                         let num = self.buckets[bucket].num_tuples();
 
                         // Perform bst retrieval
@@ -853,7 +845,7 @@ impl<'a> PungClient<'a> {
                                 t.mac()
                             ));
 
-                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..32].to_vec()).unwrap());
+                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..31].to_vec()).unwrap());
                             metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
                             messages.push(m);
@@ -1740,7 +1732,7 @@ impl<'a> PungClient<'a> {
         request.get().set_query(query.query);
         request.get().set_qnum(query.num);
 
-        println!("Upload (pir) {} bytes", 32 + query.query.len());
+        // println!("Upload (pir) {} bytes", 32 + query.query.len());
 
         // Send request to the server and get response
         let response = try!(request.send().promise.wait(scope, port));
@@ -1760,7 +1752,7 @@ impl<'a> PungClient<'a> {
         let metrics_text = format!("recv;{}\n", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
         metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
-        println!("Download (pir) {} bytes", 8 + answer.len());
+        // println!("Download (pir) {} bytes", 8 + answer.len());
 
         Ok(db::PungTuple::new(decoded.result))
     }
@@ -1784,8 +1776,9 @@ impl<'a> PungClient<'a> {
 
         // Request level by level
         for h in 0..tree_height {
-            let tuple = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port, metrics_pipe));
 
+            let tuple = try!(self.pir_retr(bucket, collection, h, idx, len, scope, port, metrics_pipe));
+            
             if result.is_none() {
                 if tuple.gt(label) {
                     // if L* < L
@@ -1933,6 +1926,7 @@ impl<'a> PungClient<'a> {
         port: &mut gjio::EventPort,
         metrics_pipe: &mut File,
     ) -> Result<Vec<Vec<u8>>, Error> {
+
         if peer_names.len() as u32 > self.ret_rate {
             return Err(Error::failed("Number of peers exceeds rate".to_string()));
         }

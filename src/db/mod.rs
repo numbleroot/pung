@@ -10,7 +10,7 @@ pub const LABEL_SIZE: usize = 32;
 
 /// Size of ciphertext in Pung (256 bytes, due to 256-byte message limit). See
 /// [client] (../client/pcrypto/index.html).
-pub const CIPHER_SIZE: usize = 238;
+pub const CIPHER_SIZE: usize = 256;
 
 /// Size of the message authentication code (128-bits, due to
 /// [Poly1305 MAC](../../crypto/poly1305/index.html)).

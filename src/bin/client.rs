@@ -165,13 +165,15 @@ pub fn main() {
             let start_round = PreciseTime::now();
             for round in 0..rounds {
 
-                println!("{} - Sending {} tuples for round {}", unique_id, send_rate, client.get_round());
+                let msg_id = (round as u32) + 1;
+
+                println!("\n{} - Sending {} tuples to peer '{}' for round {}", unique_id, send_rate, peer_name, client.get_round());
 
                 // create random message
                 let mut messages = Vec::with_capacity(send_rate as usize);
 
-                for i in 0..send_rate {
-                    let msg = format!("{}=>{} {:05} msg #{} from {}", user_name, peer_name, round as u32, i, unique_id).into_bytes();
+                for _i in 0..send_rate {
+                    let msg = format!("{}=>{}{:05}All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood. Everyone is entitled to all the rights and freedoms se", user_name, peer_name, msg_id).into_bytes();
                     messages.push(msg);
                 }
 
@@ -187,7 +189,7 @@ pub fn main() {
 
 
                 // retrieve msg
-                println!("{} - Retrieving a message for round {}", unique_id, client.get_round());
+                println!("\n{} - Retrieving a message for round {}", unique_id, client.get_round());
 
                 let start = PreciseTime::now();
 
@@ -204,7 +206,7 @@ pub fn main() {
                 println!("retr ({} msgs): {:?} usec", msgs.len(), start.to(end).num_microseconds().unwrap());
 
                 for msg in msgs {
-                    println!("{} - Retrieved msg is {}", unique_id, String::from_utf8(msg).unwrap());
+                    println!("{} - Retrieved msg is '{}'", unique_id, String::from_utf8(msg).unwrap());
                 }
 
                 client.inc_round(1);
