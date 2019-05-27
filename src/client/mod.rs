@@ -413,7 +413,8 @@ impl<'a> PungClient<'a> {
 
         // Write time of successful send operation out to metrics pipe.
         let send_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-        let metrics_text = format!("send;{} {}=>{} {:05}\n", send_time.as_nanos(), self.name, recipient, self.round);
+        let msg_id = (self.round as u32) + 1;
+        let metrics_text = format!("send;{} {}=>{} {:05}\n", send_time.as_nanos(), self.name, recipient, msg_id);
         metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
         let response = try!(res_ptr.get());
@@ -772,7 +773,7 @@ impl<'a> PungClient<'a> {
                                 t.mac()
                             ));
 
-                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..31].to_vec()).unwrap());
+                            let metrics_text = format!("recv;{} {}\n", String::from_utf8(m[..26].to_vec()).unwrap(), String::from_utf8(m[26..31].to_vec()).unwrap());
                             metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
                             messages.push(m);
@@ -813,7 +814,7 @@ impl<'a> PungClient<'a> {
                                 t.mac()
                             ));
 
-                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..31].to_vec()).unwrap());
+                            let metrics_text = format!("recv;{} {}\n", String::from_utf8(m[..26].to_vec()).unwrap(), String::from_utf8(m[26..31].to_vec()).unwrap());
                             metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
                             messages.push(m);
@@ -845,7 +846,7 @@ impl<'a> PungClient<'a> {
                                 t.mac()
                             ));
 
-                            let metrics_text = format!("recv;{}\n", String::from_utf8(m[..31].to_vec()).unwrap());
+                            let metrics_text = format!("recv;{} {}\n", String::from_utf8(m[..26].to_vec()).unwrap(), String::from_utf8(m[26..31].to_vec()).unwrap());
                             metrics_pipe.write_all(&metrics_text.into_bytes())?;
 
                             messages.push(m);
