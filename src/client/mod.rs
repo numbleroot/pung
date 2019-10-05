@@ -417,8 +417,11 @@ impl<'a> PungClient<'a> {
         // Write time of successful send operation out to metrics pipe.
         let send_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
 
-        let metrics_text = format!("send;{} {}=>{} {:05}\n", send_time.as_nanos(), self.name, recipient, msg_id);
-        metrics_pipe.write_all(&metrics_text.into_bytes())?;
+        let metrics_msg_text = format!("send;{}=>{} {:05}\n", self.name, recipient, msg_id);
+        metrics_pipe.write_all(&metrics_msg_text.into_bytes())?;
+
+        let metrics_msg_time = format!("send;{}\n", send_time.as_nanos());
+        metrics_pipe.write_all(&metrics_msg_time.into_bytes())?;
 
         let response = try!(res_ptr.get());
 
